@@ -38,8 +38,9 @@ class CSnow {
   public:
     CSnow();
 
-    // Respawns all flakes for a buffer of w x h pixels at the given scale.
-    // Piles survive if the size didn't change.
+    // Applies a config for a buffer of w x h pixels at the given scale. A new size
+    // respawns all flakes; the same size restyles the flakes in place and adds or
+    // retires flakes gradually, and keeps the piles.
     void                               reset(const SSnowConfig& cfg, uint32_t w, uint32_t h, float scale);
 
     // Visible windows. `layoutKey` identifies the visible workspace(s): while it stays
@@ -65,9 +66,10 @@ class CSnow {
         float radius, alpha, fallSpeed;
         float swayAmp, swayFreq, swayPhase;
         float rotation, rotSpeed;
+        float rSize, rAlpha, rSpeed, rSway, rCrystal; // per-flake randomness, kept across restyles
         bool  crystal;
         bool  behind;    // has passed behind a window, can't land on windows
-        bool  transient; // shaken-off snow: removed instead of respawned
+        bool  transient; // shaken-off or surplus snow: removed instead of respawned
         bool  dead;
     };
 
@@ -86,6 +88,8 @@ class CSnow {
     };
 
     void                        spawn(SFlake& f, bool anywhere);
+    void                        applyStyle(SFlake& f);
+    void                        retarget(size_t count);
     float                       rand01();
 
     void                        initPile(SPile& pile, float x, float y, float w, float maxH, bool wallEnds);

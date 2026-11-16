@@ -52,26 +52,77 @@ void CSnow::reset(const SSnowConfig& cfg, uint32_t w, uint32_t h, float scale) {
     const float  logicalArea = (m_w / scale) * (m_h / scale);
     const size_t count       = (size_t)std::lround(cfg.flakes * logicalArea / (1920.0f * 1080.0f));
 
-    m_flakes.resize(count);
-    for (auto& f : m_flakes) {
-        // more far flakes than near ones
-        f.z = std::pow(rand01(), 1.7f);
-        spawn(f, true);
-    }
+    if (!sameSize) {
+        m_flakes.resize(count);
+        for (auto& f : m_flakes) {
+            // more far flakes than near ones
+            f.z = std::pow(rand01(), 1.7f);
+            spawn(f, true);
+        }
+    } else
+        retarget(count);
 
     // draw far flakes first so near ones blend on top; respawns keep z, so this stays sorted
     std::sort(m_flakes.begin(), m_flakes.end(), [](const SFlake& a, const SFlake& b) { return a.z < b.z; });
     update(0.0);
 }
 
-void CSnow::spawn(SFlake& f, bool anywhere) {
+void CSnow::retarget(size_t count) {
+    // flakes already on screen keep their position and pick up the new look and speed
+    size_t live = 0;
+    for (auto& f : m_flakes) {
+        if (f.transient)
+            continue;
+        applyStyle(f);
+        ++live;
+    }
+
+    if (live < count) {
+        // new flakes start spread out above the screen, so the snow thickens from the top
+        for (size_t i = live; i < count; ++i) {
+            SFlake f;
+            f.z = std::pow(rand01(), 1.7f);
+            spawn(f, false);
+            f.y = -f.radius - rand01() * m_h;
+            m_flakes.push_back(f);
+        }
+    } else if (live > count) {
+        // surplus flakes finish their fall and aren't respawned
+        std::vector<SFlake*> pool;
+        pool.reserve(live);
+        for (auto& f : m_flakes)
+            if (!f.transient)
+                pool.push_back(&f);
+        std::shuffle(pool.begin(), pool.end(), m_rng);
+        for (size_t i = 0; i < live - count; ++i)
+            pool[i]->transient = true;
+    }
+}
+
+void CSnow::applyStyle(SFlake& f) {
     const float z     = f.z;
     const float depth = 0.35f + 0.65f * z; // speed/wind factor: far flakes move slower
 
-    f.radius    = (m_cfg.minSize + (m_cfg.maxSize - m_cfg.minSize) * std::pow(z, 1.5f)) * (0.85f + 0.3f * rand01()) * m_scale;
-    f.alpha     = m_cfg.opacity * (0.35f + 0.65f * z) * (0.8f + 0.2f * rand01());
-    f.fallSpeed = BASE_FALL * m_cfg.speed * depth * (0.85f + 0.3f * rand01()) * m_scale;
-    f.swayAmp   = m_cfg.sway * (3.0f + 11.0f * z) * (0.5f + rand01()) * m_scale;
+    f.radius    = (m_cfg.minSize + (m_cfg.maxSize - m_cfg.minSize) * std::pow(z, 1.5f)) * (0.85f + 0.3f * f.rSize) * m_scale;
+    f.alpha     = m_cfg.opacity * (0.35f + 0.65f * z) * (0.8f + 0.2f * f.rAlpha);
+    f.fallSpeed = BASE_FALL * m_cfg.speed * depth * (0.85f + 0.3f * f.rSpeed) * m_scale;
+    f.swayAmp   = m_cfg.sway * (3.0f + 11.0f * z) * (0.5f + f.rSway) * m_scale;
+
+    // crystals need enough pixels to read as a shape
+    const bool bigEnough = f.radius >= 3.0f * m_scale;
+    switch (m_cfg.style) {
+        case eFlakeStyle::SOFT: f.crystal = false; break;
+        case eFlakeStyle::CRYSTAL: f.crystal = bigEnough; break;
+        case eFlakeStyle::MIXED: f.crystal = bigEnough && z > 0.6f && f.rCrystal < 0.5f; break;
+    }
+}
+
+void CSnow::spawn(SFlake& f, bool anywhere) {
+    f.rSize     = rand01();
+    f.rAlpha    = rand01();
+    f.rSpeed    = rand01();
+    f.rSway     = rand01();
+    f.rCrystal  = rand01();
     f.swayFreq  = 0.4f + 0.9f * rand01();
     f.swayPhase = rand01() * 2 * std::numbers::pi_v<float>;
     f.rotation  = rand01() * 2 * std::numbers::pi_v<float>;
@@ -79,14 +130,7 @@ void CSnow::spawn(SFlake& f, bool anywhere) {
     f.behind    = false;
     f.transient = false;
     f.dead      = false;
-
-    // crystals need enough pixels to read as a shape
-    const bool bigEnough = f.radius >= 3.0f * m_scale;
-    switch (m_cfg.style) {
-        case eFlakeStyle::SOFT: f.crystal = false; break;
-        case eFlakeStyle::CRYSTAL: f.crystal = bigEnough; break;
-        case eFlakeStyle::MIXED: f.crystal = bigEnough && z > 0.6f && rand01() < 0.5f; break;
-    }
+    applyStyle(f);
 
     f.x     = rand01() * m_w;
     f.y     = anywhere ? rand01() * (m_h + 2 * f.radius) - f.radius : -f.radius - rand01() * 30.0f * m_scale;
